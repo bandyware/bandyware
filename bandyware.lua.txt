@@ -1,22 +1,16 @@
 repeat task.wait() until game:IsLoaded()
 
-local Keybind = shared.Keybind or "RightShift"
-local collectionService = game:GetService("CollectionService")
-local debris = game:GetService("Debris")
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
+local collectionService = game:GetService("CollectionService")
+local debris = game:GetService("Debris")
+
 local LocalPlayer = Players.LocalPlayer
 local Camera = workspace.CurrentCamera
 
--- Configurações do Aim Assist (Camlock)
-local CamlockKey = Enum.KeyCode.CapsLock
-local Smoothness = 0.22
-local MaxDistance = 150
-local LockAngle = 160
-
-local CamlockEnabled = false
-local Target = nil
+local EspKeybind = shared.Keybind or "RightShift"
+local hidden = false
 
 local Icons = {
     ["iron"] = "rbxassetid://6850537969",
@@ -29,14 +23,22 @@ local Icons = {
     ["vitality_star"] = "rbxassetid://9866757969"
 }
 
-local itemEspFold = Instance.new("Folder")
-local playerEspFold = Instance.new("Folder")
-local gui = Instance.new("ScreenGui", LocalPlayer.PlayerGui)
+local espobjs = {}
+local espfold = Instance.new("Folder")
+local gui = Instance.new("ScreenGui", LocalPlayer:WaitForChild("PlayerGui"))
 gui.ResetOnSpawn = false
-itemEspFold.Parent = gui
-playerEspFold.Parent = gui
+gui.Name = "UnifiedSystemGUI"
+espfold.Parent = gui
 
-local kitHidden = false
+local connections = {}
+
+local CamlockKey = Enum.KeyCode.CapsLock
+local Smoothness = 0.23
+local MaxDistance = 150
+local LockAngle = 160
+
+local CamlockEnabled = false
+local Target = nil
 
 local function isKeybindValid(key)
     return Enum.KeyCode[key] ~= nil
@@ -57,21 +59,71 @@ local function showNotification(message)
     debris:AddItem(notification, 3)
 end
 
-if not isKeybindValid(Keybind) then
-    showNotification("Invalid keybind! Defaulting to RightShift.")
-    Keybind = "RightShift"
+if not isKeybindValid(EspKeybind) then
+    showNotification("Invalid ESP keybind! Defaulting to RightShift.")
+    EspKeybind = "RightShift"
 else
-    showNotification("Press "..tostring(Keybind).." to toggle Kit ESP")
+    showNotification("Kit ESP: " .. tostring(EspKeybind) .. " | Aim: CapsLock")
 end
 
--- Sistema de Ícones/Kits
-local itemEspObjs = {}
+local function updateHighlight(player, character)
+    if not character then return end
+
+    local highlight = character:FindFirstChild("EspContorno")
+    if not highlight then
+        highlight = Instance.new("Highlight")
+        highlight.Name = "EspContorno"
+        highlight.FillTransparency = 1
+        highlight.OutlineTransparency = 0
+        highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop 
+        highlight.Parent = character
+    end
+
+    if LocalPlayer.Team ~= nil and player.Team ~= nil and LocalPlayer.Team == player.Team then
+        highlight.OutlineColor = Color3.fromRGB(0, 255, 0)
+    else
+        highlight.OutlineColor = Color3.fromRGB(255, 0, 0)
+    end
+end
+
+local function monitorPlayer(player)
+    if player == LocalPlayer then return end
+
+    local function onCharacterAdded(character)
+        task.wait(0.2)
+        updateHighlight(player, character)
+    end
+
+    if player.Character then
+        onCharacterAdded(player.Character)
+    end
+    
+    player.CharacterAdded:Connect(onCharacterAdded)
+
+    player:GetPropertyChangedSignal("Team"):Connect(function()
+        if player.Character then
+            updateHighlight(player, player.Character)
+        end
+    end)
+end
+
+for _, player in ipairs(Players:GetPlayers()) do
+    monitorPlayer(player)
+end
+Players.PlayerAdded:Connect(monitorPlayer)
+
+LocalPlayer:GetPropertyChangedSignal("Team"):Connect(function()
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character then
+            updateHighlight(player, player.Character)
+        end
+    end
+end)
 
 local function espadd(v, icon)
-    if not v then return end
     local billboard = Instance.new("BillboardGui")
-    billboard.Parent = itemEspFold
-    billboard.Name = "ItemESP"
+    billboard.Parent = espfold
+    billboard.Name = "iron"
     billboard.StudsOffsetWorldSpace = Vector3.new(0, 3, 1.5)
     billboard.Size = UDim2.new(0, 32, 0, 32)
     billboard.AlwaysOnTop = true
@@ -90,58 +142,56 @@ local function espadd(v, icon)
     uicorner.CornerRadius = UDim.new(0, 4)
     uicorner.Parent = image
     
-    itemEspObjs[v] = billboard
+    espobjs[v] = billboard
 end
 
-local kitConnections = {}
-
-local function resetKits()
-    for _, v in pairs(kitConnections) do
+local function resetESP()
+    for _, v in pairs(connections) do
         pcall(function() v:Disconnect() end)
     end
-    itemEspFold:ClearAllChildren()
-    table.clear(itemEspObjs)
+    espfold:ClearAllChildren()
+    table.clear(espobjs)
 end
 
 local function addKit(tag, icon, custom)
     if not custom then
         local con1 = collectionService:GetInstanceAddedSignal(tag):Connect(function(v)
-            if v and v.PrimaryPart then espadd(v.PrimaryPart, icon) end
+            espadd(v.PrimaryPart, icon)
         end)
         local con2 = collectionService:GetInstanceRemovedSignal(tag):Connect(function(v)
-            if v and v.PrimaryPart and itemEspObjs[v.PrimaryPart] then
-                itemEspObjs[v.PrimaryPart]:Destroy()
-                itemEspObjs[v.PrimaryPart] = nil
+            if espobjs[v.PrimaryPart] then
+                espobjs[v.PrimaryPart]:Destroy()
+                espobjs[v.PrimaryPart] = nil
             end
         end)
-        table.insert(kitConnections, con1)
-        table.insert(kitConnections, con2)
+        table.insert(connections, con1)
+        table.insert(connections, con2)
         for _, v in pairs(collectionService:GetTagged(tag)) do
-            if v and v.PrimaryPart then espadd(v.PrimaryPart, icon) end
+            espadd(v.PrimaryPart, icon)
         end
     else
         local function check(v)
-            if v.Name == tag and v.ClassName == "Model" and v.PrimaryPart then
+            if v.Name == tag and v.ClassName == "Model" then
                 espadd(v.PrimaryPart, icon)
             end
         end
-        table.insert(kitConnections, workspace.ChildAdded:Connect(check))
-        table.insert(kitConnections, workspace.ChildRemoved:Connect(function(v)
+        game.Workspace.ChildAdded:Connect(check)
+        game.Workspace.ChildRemoved:Connect(function(v)
             pcall(function()
-                if v and v.PrimaryPart and itemEspObjs[v.PrimaryPart] then
-                    itemEspObjs[v.PrimaryPart]:Destroy()
-                    itemEspObjs[v.PrimaryPart] = nil
+                if espobjs[v.PrimaryPart] then
+                    espobjs[v.PrimaryPart]:Destroy()
+                    espobjs[v.PrimaryPart] = nil
                 end
             end)
-        end))
-        for _, v in pairs(workspace:GetChildren()) do
+        end)
+        for _, v in pairs(game.Workspace:GetChildren()) do
             check(v)
         end
     end
 end
 
-local function loadKitESP()
-    resetKits()
+local function recreateESP()
+    resetESP()
     addKit("hidden-metal", "iron")
     addKit("bee", "bee")
     addKit("treeOrb", "natures_essence_1")
@@ -149,67 +199,10 @@ local function loadKitESP()
     addKit("Mushrooms", "mushrooms", true)
     addKit("Flower", "wild_flower", true)
     addKit("CritStar", "crit_star", true)
-	addKit("VitalityStar", "vitality_star", true)
+    addKit("VitalityStar", "vitality_star", true)
 end
+recreateESP()
 
--- ESP 3D de Jogadores (Sempre Ativado, Vermelho, Ignora Time Próprio)
-local playerBoxes = {}
-local permanentConnections = {}
-
-local function createPlayerBox(player)
-    if playerBoxes[player] then return end
-    
-    local boxHolder = Instance.new("Highlight")
-    boxHolder.Name = player.Name .. "_ESP"
-    boxHolder.Adornee = nil
-    boxHolder.FillColor = Color3.fromRGB(255, 0, 0)
-    boxHolder.FillTransparency = 0.5
-    boxHolder.OutlineColor = Color3.fromRGB(255, 255, 255)
-    boxHolder.OutlineTransparency = 0
-    boxHolder.Parent = playerEspFold
-    
-    playerBoxes[player] = boxHolder
-
-    local connection
-    connection = RunService.RenderStepped:Connect(function()
-        if not player.Character or not player.Character:FindFirstChild("HumanoidRootPart") or player == LocalPlayer then
-            boxHolder.Adornee = nil
-            return
-        end
-
-        if player.Team and LocalPlayer.Team and player.Team == LocalPlayer.Team then
-            boxHolder.Adornee = nil
-            return
-        end
-
-        boxHolder.Adornee = player.Character
-    end)
-    
-    table.insert(permanentConnections, connection)
-end
-
-local function initPlayerESP()
-    for _, player in ipairs(Players:GetPlayers()) do
-        if player ~= LocalPlayer then
-            createPlayerBox(player)
-        end
-    end
-    
-    table.insert(permanentConnections, Players.PlayerAdded:Connect(function(player)
-        if player ~= LocalPlayer then
-            createPlayerBox(player)
-        end
-    end))
-    
-    table.insert(permanentConnections, Players.PlayerRemoving:Connect(function(player)
-        if playerBoxes[player] then
-            playerBoxes[player]:Destroy()
-            playerBoxes[player] = nil
-        end
-    end))
-end
-
--- Funções do Aim Assist (Camlock)
 local function GetAngle(targetPos)
     local camDir = Camera.CFrame.LookVector
     local dirToTarget = (targetPos - Camera.CFrame.Position).Unit
@@ -240,7 +233,6 @@ local function FindNearestEnemy()
     return closest
 end
 
--- Loop Principal do Aim Assist
 RunService.RenderStepped:Connect(function()
     if CamlockEnabled and Target then
         local character = Target.Parent
@@ -261,24 +253,19 @@ RunService.RenderStepped:Connect(function()
     end
 end)
 
--- Gerenciamento de Teclas (Keybinds)
 UserInputService.InputBegan:Connect(function(input, gp)
     if gp then return end
 
-    -- Toggle do Kit ESP com a tecla principal (ex: RightShift)
-    if input.KeyCode == Enum.KeyCode[Keybind] then
-        if kitHidden then 
-            loadKitESP() 
-            kitHidden = false 
-            showNotification("Kit ESP: ON")
+    if input.KeyCode == Enum.KeyCode[EspKeybind] then
+        if hidden then 
+            recreateESP() 
+            hidden = false 
         else 
-            resetKits() 
-            kitHidden = true 
-            showNotification("Kit ESP: OFF")
+            resetESP() 
+            hidden = true 
         end
     end
 
-    -- Toggle do Aim Assist com CapsLock
     if input.KeyCode == CamlockKey then
         if not CamlockEnabled then
             Target = FindNearestEnemy()
@@ -291,7 +278,3 @@ UserInputService.InputBegan:Connect(function(input, gp)
         end
     end
 end)
-
--- Inicialização
-initPlayerESP()
-loadKitESP()
